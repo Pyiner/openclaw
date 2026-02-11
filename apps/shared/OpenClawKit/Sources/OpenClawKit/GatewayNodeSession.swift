@@ -406,13 +406,17 @@ public actor GatewayNodeSession {
                 NSLocalizedDescriptionKey: "paramsJSON not UTF-8",
             ])
         }
+        // Prefer Codable decode to preserve booleans as Bool.
+        if let decoded = try? self.decoder.decode([String: AnyCodable].self, from: data) {
+            return decoded
+        }
+
+        // Fallback path for loosely-typed payloads.
         let raw = try JSONSerialization.jsonObject(with: data)
         guard let dict = raw as? [String: Any] else {
             return nil
         }
-        return dict.reduce(into: [:]) { acc, entry in
-            acc[entry.key] = AnyCodable(entry.value)
-        }
+        return dict.reduce(into: [:]) { acc, entry in acc[entry.key] = AnyCodable(entry.value) }
     }
 
     private func broadcastServerEvent(_ evt: EventFrame) {

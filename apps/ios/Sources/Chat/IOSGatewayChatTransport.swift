@@ -32,6 +32,23 @@ struct IOSGatewayChatTransport: OpenClawChatTransport, Sendable {
         return try JSONDecoder().decode(OpenClawChatSessionsListResponse.self, from: res)
     }
 
+    func listCommands(sessionKey: String?) async throws -> [OpenClawSlashCommand] {
+        struct Params: Codable {
+            var sessionKey: String?
+            var includePlugins: Bool
+            var includeSkills: Bool
+        }
+        let data = try JSONEncoder().encode(
+            Params(
+                sessionKey: sessionKey?.trimmingCharacters(in: .whitespacesAndNewlines),
+                includePlugins: true,
+                includeSkills: true))
+        let json = String(data: data, encoding: .utf8)
+        let res = try await self.gateway.request(method: "commands.list", paramsJSON: json, timeoutSeconds: 15)
+        let decoded = try JSONDecoder().decode(OpenClawCommandsListResponse.self, from: res)
+        return decoded.commands
+    }
+
     func setActiveSessionKey(_ sessionKey: String) async throws {
         struct Subscribe: Codable { var sessionKey: String }
         let data = try JSONEncoder().encode(Subscribe(sessionKey: sessionKey))

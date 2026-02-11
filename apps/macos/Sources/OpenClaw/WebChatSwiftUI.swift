@@ -46,6 +46,25 @@ struct MacGatewayChatTransport: OpenClawChatTransport, Sendable {
         return try JSONDecoder().decode(OpenClawChatSessionsListResponse.self, from: data)
     }
 
+    func listCommands(sessionKey: String?) async throws -> [OpenClawSlashCommand] {
+        var params: [String: AnyCodable] = [
+            "includePlugins": AnyCodable(true),
+            "includeSkills": AnyCodable(true),
+        ]
+        if let sessionKey {
+            let trimmed = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                params["sessionKey"] = AnyCodable(trimmed)
+            }
+        }
+        let data = try await GatewayConnection.shared.request(
+            method: "commands.list",
+            params: params,
+            timeoutMs: 15000)
+        let payload = try JSONDecoder().decode(OpenClawCommandsListResponse.self, from: data)
+        return payload.commands
+    }
+
     func sendMessage(
         sessionKey: String,
         message: String,

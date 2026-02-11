@@ -10,6 +10,7 @@ public enum OpenClawChatTransportEvent: Sendable {
 
 public protocol OpenClawChatTransport: Sendable {
     func requestHistory(sessionKey: String) async throws -> OpenClawChatHistoryPayload
+    func listCommands(sessionKey: String?) async throws -> [OpenClawSlashCommand]
     func sendMessage(
         sessionKey: String,
         message: String,
@@ -41,5 +42,12 @@ extension OpenClawChatTransport {
             domain: "OpenClawChatTransport",
             code: 0,
             userInfo: [NSLocalizedDescriptionKey: "sessions.list not supported by this transport"])
+    }
+
+    public func listCommands(sessionKey _: String?) async throws -> [OpenClawSlashCommand] {
+        throw NSError(
+            domain: "OpenClawChatTransport",
+            code: 0,
+            userInfo: [NSLocalizedDescriptionKey: "commands.list not supported by this transport"])
     }
 }

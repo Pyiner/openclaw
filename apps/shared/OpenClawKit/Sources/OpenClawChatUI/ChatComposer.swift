@@ -12,6 +12,7 @@ struct OpenClawChatComposer: View {
     @Bindable var viewModel: OpenClawChatViewModel
     let style: OpenClawChatView.Style
     let showsSessionSwitcher: Bool
+    @State private var showSlashCommands = false
 
     #if !os(macOS)
     @State private var pickerItems: [PhotosPickerItem] = []
@@ -28,6 +29,7 @@ struct OpenClawChatComposer: View {
                         self.sessionPicker
                     }
                     self.thinkingPicker
+                    self.slashCommandsButton
                     Spacer()
                     self.refreshButton
                     self.attachmentPicker
@@ -80,6 +82,9 @@ struct OpenClawChatComposer: View {
             self.shouldFocusTextView = true
         }
         #endif
+        .sheet(isPresented: self.$showSlashCommands) {
+            SlashCommandsSheet(viewModel: self.viewModel)
+        }
     }
 
     private var thinkingPicker: some View {
@@ -113,6 +118,17 @@ struct OpenClawChatComposer: View {
         .controlSize(.small)
         .frame(maxWidth: 160, alignment: .leading)
         .help("Session")
+    }
+
+    private var slashCommandsButton: some View {
+        Button {
+            self.showSlashCommands = true
+        } label: {
+            Image(systemName: "slash.circle")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .help("Slash Commands")
     }
 
     @ViewBuilder
@@ -380,6 +396,91 @@ struct OpenClawChatComposer: View {
         self.pickerItems = []
     }
     #endif
+}
+
+private struct SlashCommandsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Bindable var viewModel: OpenClawChatViewModel
+    @State private var searchText = ""
+
+    private var filteredCommands: [OpenClawSlashCommand] {
+        let query = self.searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return self.viewModel.sendableSlashCommands }
+        return self.viewModel.sendableSlashCommands.filter { command in
+            if command.name.lowercased().contains(query) { return true }
+            if command.slash.lowercased().contains(query) { return true }
+            if command.description.lowercased().contains(query) { return true }
+            if (command.aliases ?? []).contains(where: { $0.lowercased().contains(query) }) { return true }
+            return false
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if self.viewModel.isLoadingSlashCommands && self.viewModel.sendableSlashCommands.isEmpty {
+                    ProgressView("Loading commands…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if self.filteredCommands.isEmpty {
+                    VStack(spacing: 8) {
+                        Text("No slash commands")
+                            .font(.headline)
+                        Text("Try a different keyword or refresh commands.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(self.filteredCommands) { command in
+                        Button {
+                            self.dismiss()
+                            self.viewModel.sendSlashCommand(command.slash)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 8) {
+                                    Text(command.slash)
+                                        .font(.system(.body, design: .monospaced).weight(.semibold))
+                                    Spacer(minLength: 0)
+                                    Text(command.source.uppercased())
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text(command.description)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .listStyle(.plain)
+                }
+            }
+            .navigationTitle("Slash Commands")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { self.dismiss() }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        self.viewModel.refreshSlashCommands()
+                    } label: {
+                        if self.viewModel.isLoadingSlashCommands {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                    }
+                    .disabled(self.viewModel.isLoadingSlashCommands)
+                }
+            }
+        }
+        .searchable(text: self.$searchText, prompt: "Search commands")
+        .task {
+            self.viewModel.loadSlashCommandsIfNeeded()
+        }
+    }
 }
 
 #if os(macOS)

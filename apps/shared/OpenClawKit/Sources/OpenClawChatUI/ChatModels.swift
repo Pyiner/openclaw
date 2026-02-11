@@ -261,6 +261,39 @@ public struct OpenClawChatSendResponse: Codable, Sendable {
     public let status: String
 }
 
+public struct OpenClawSlashCommandArgChoice: Codable, Hashable, Sendable {
+    public let value: String
+    public let label: String
+}
+
+public struct OpenClawSlashCommandArg: Codable, Hashable, Sendable {
+    public let name: String
+    public let description: String
+    public let type: String
+    public let required: Bool?
+    public let captureRemaining: Bool?
+    public let choices: [OpenClawSlashCommandArgChoice]?
+}
+
+public struct OpenClawSlashCommand: Codable, Hashable, Identifiable, Sendable {
+    public var id: String { self.key }
+    public let key: String
+    public let name: String
+    public let slash: String
+    public let description: String
+    public let scope: String
+    public let source: String
+    public let category: String?
+    public let aliases: [String]?
+    public let nativeName: String?
+    public let acceptsArgs: Bool?
+    public let args: [OpenClawSlashCommandArg]?
+}
+
+public struct OpenClawCommandsListResponse: Codable, Sendable {
+    public let commands: [OpenClawSlashCommand]
+}
+
 public struct OpenClawChatEventPayload: Codable, Sendable {
     public let runId: String?
     public let sessionKey: String?

@@ -31,6 +31,8 @@ public final class OpenClawChatViewModel {
     public private(set) var streamingAssistantText: String?
     public private(set) var pendingToolCalls: [OpenClawChatPendingToolCall] = []
     public private(set) var sessions: [OpenClawChatSessionEntry] = []
+    public private(set) var slashCommands: [OpenClawSlashCommand] = []
+    public private(set) var isLoadingSlashCommands = false
     private let transport: any OpenClawChatTransport
 
     @ObservationIgnored
@@ -84,7 +86,23 @@ public final class OpenClawChatViewModel {
     }
 
     public func send() {
-        Task { await self.performSend() }
+        Task {
+            await self.performSend(
+                inputOverride: nil,
+                draftAttachments: self.attachments,
+                clearDraftOnSend: true)
+        }
+    }
+
+    public func sendSlashCommand(_ command: String) {
+        let normalized = Self.normalizeSlashCommand(command)
+        guard !normalized.isEmpty else { return }
+        Task {
+            await self.performSend(
+                inputOverride: normalized,
+                draftAttachments: [],
+                clearDraftOnSend: false)
+        }
     }
 
     public func abort() {
@@ -97,6 +115,14 @@ public final class OpenClawChatViewModel {
 
     public func switchSession(to sessionKey: String) {
         Task { await self.performSwitchSession(to: sessionKey) }
+    }
+
+    public func loadSlashCommandsIfNeeded() {
+        Task { await self.fetchSlashCommands(force: false) }
+    }
+
+    public func refreshSlashCommands() {
+        Task { await self.fetchSlashCommands(force: true) }
     }
 
     public var sessionChoices: [OpenClawChatSessionEntry] {
@@ -145,6 +171,12 @@ public final class OpenClawChatViewModel {
     public var canSend: Bool {
         let trimmed = self.input.trimmingCharacters(in: .whitespacesAndNewlines)
         return !self.isSending && self.pendingRunCount == 0 && (!trimmed.isEmpty || !self.attachments.isEmpty)
+    }
+
+    public var sendableSlashCommands: [OpenClawSlashCommand] {
+        self.slashCommands
+            .filter { Self.isSendableScope($0.scope) }
+            .sorted { lhs, rhs in lhs.slash.localizedCaseInsensitiveCompare(rhs.slash) == .orderedAscending }
     }
 
     // MARK: - Internals
@@ -213,10 +245,16 @@ public final class OpenClawChatViewModel {
         return "\(message.role)|\(timestamp)|\(text)"
     }
 
-    private func performSend() async {
+    private func performSend(
+        inputOverride: String?,
+        draftAttachments: [OpenClawPendingAttachment],
+        clearDraftOnSend: Bool) async
+    {
         guard !self.isSending else { return }
-        let trimmed = self.input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty || !self.attachments.isEmpty else { return }
+        let trimmed =
+            inputOverride?.trimmingCharacters(in: .whitespacesAndNewlines) ??
+            self.input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty || !draftAttachments.isEmpty else { return }
 
         guard self.healthOK else {
             self.errorText = "Gateway health not OK; cannot send"
@@ -226,7 +264,7 @@ public final class OpenClawChatViewModel {
         self.isSending = true
         self.errorText = nil
         let runId = UUID().uuidString
-        let messageText = trimmed.isEmpty && !self.attachments.isEmpty ? "See attached." : trimmed
+        let messageText = trimmed.isEmpty && !draftAttachments.isEmpty ? "See attached." : trimmed
         self.pendingRuns.insert(runId)
         self.armPendingRunTimeout(runId: runId)
         self.pendingToolCallsById = [:]
@@ -246,7 +284,7 @@ public final class OpenClawChatViewModel {
                 name: nil,
                 arguments: nil),
         ]
-        let encodedAttachments = self.attachments.map { att -> OpenClawChatAttachmentPayload in
+        let encodedAttachments = draftAttachments.map { att -> OpenClawChatAttachmentPayload in
             OpenClawChatAttachmentPayload(
                 type: att.type,
                 mimeType: att.mimeType,
@@ -275,8 +313,10 @@ public final class OpenClawChatViewModel {
                 timestamp: Date().timeIntervalSince1970 * 1000))
 
         // Clear input immediately for responsive UX (before network await)
-        self.input = ""
-        self.attachments = []
+        if clearDraftOnSend {
+            self.input = ""
+            self.attachments = []
+        }
 
         do {
             let response = try await self.transport.sendMessage(
@@ -324,12 +364,39 @@ public final class OpenClawChatViewModel {
         }
     }
 
+    private func fetchSlashCommands(force: Bool) async {
+        if self.isLoadingSlashCommands { return }
+        if !force, !self.slashCommands.isEmpty { return }
+
+        self.isLoadingSlashCommands = true
+        defer { self.isLoadingSlashCommands = false }
+        do {
+            let commands = try await self.transport.listCommands(sessionKey: self.sessionKey)
+            self.slashCommands = commands
+        } catch {
+            self.errorText = error.localizedDescription
+            chatUILogger.error("commands.list failed \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     private func performSwitchSession(to sessionKey: String) async {
         let next = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !next.isEmpty else { return }
         guard next != self.sessionKey else { return }
         self.sessionKey = next
+        self.slashCommands = []
         await self.bootstrap()
+    }
+
+    private static func normalizeSlashCommand(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        return trimmed.hasPrefix("/") ? trimmed : "/\(trimmed)"
+    }
+
+    private static func isSendableScope(_ scope: String) -> Bool {
+        let normalized = scope.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized == "text" || normalized == "both"
     }
 
     private func placeholderSession(key: String) -> OpenClawChatSessionEntry {
